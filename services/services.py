@@ -1,6 +1,8 @@
 from collections import Counter
 from typing import Union
 
+from aiogram.fsm.context import FSMContext
+
 
 def format_order(products: list[tuple[str, str | int]]) -> dict[str, str]:
     counter = Counter(i for i in products)
@@ -26,3 +28,13 @@ def format_order(products: list[tuple[str, str | int]]) -> dict[str, str]:
     return {'order': order,
             'length': length,
             'total_price': total_price}
+
+
+async def update_storage(length: int,
+                         storage: dict[str, Union[str, int]],
+                         state: FSMContext) -> dict[str, Union[str, int]]:
+    if storage['delete_step'] > length:
+        storage: dict[str, Union[str, int]] = await state.update_data(delete_step=1)
+    elif storage['delete_step'] < 1:
+        storage: dict[str, Union[str, int]] = await state.update_data(delete_step=length)
+    return storage

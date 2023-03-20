@@ -17,10 +17,10 @@ from states.FSMPayment import FSMPayment
 from states.FSMBalance import FSMBalance
 from middlewares.throttling import AntiFloodMiddleware
 
-
 user_router: Router = Router()
 user_router.message.middleware(AntiFloodMiddleware())
 user_router.callback_query.middleware(AntiFloodMiddleware())
+
 
 @user_router.message(CommandStart())
 async def process_start_command(message: Message, bot: Bot) -> None:
@@ -122,7 +122,7 @@ async def show_products(callback: CallbackQuery, state: FSMContext) -> None:
 
         await state.set_state(FSMMenu.step)
         storage: dict[str, Union[str, int]] = await state.update_data(step=1,
-                                          category=category_id)
+                                                                      category=category_id)
 
         await callback.message.answer_photo(photo=list_of_products[storage['step'] - 1]['photo'],
                                             caption=f'<b> {list_of_products[storage["step"] - 1]["name"]} </b>\n\n'
@@ -279,6 +279,7 @@ async def process_payment(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.message.answer(text=LEXICON['accept_payment'],
                                   reply_markup=get_accept_payment_kb())
 
+
 @user_router.message(FSMPayment.accept, Text(text=LEXICON['yes']))
 async def process_yes_payment(message: Message, state: FSMContext) -> None:
     storage: dict[str, Union[str, int]] = await state.get_data()
@@ -303,6 +304,7 @@ async def process_yes_payment(message: Message, state: FSMContext) -> None:
 
     await state.clear()
 
+
 @user_router.message(FSMPayment.accept, Text(text=LEXICON['no']))
 async def process_no_payment(message: Message, state: FSMContext) -> None:
     await state.clear()
@@ -318,6 +320,7 @@ async def replenish_balance(message: Message, state: FSMContext) -> None:
     await message.answer(text=LEXICON['amount_money_for_replenish'],
                          reply_markup=get_start_kb())
 
+
 @user_router.message(FSMBalance.replenish_balance, lambda x: x.text.isdigit() and int(x.text) > 0)
 async def successful_amount(message: Message, state: FSMContext) -> None:
     user: User = await User.get_user(int(message.from_user.id))
@@ -328,6 +331,7 @@ async def successful_amount(message: Message, state: FSMContext) -> None:
 
     await message.answer(text=LEXICON['successful_replenish_balance'],
                          reply_markup=get_start_kb())
+
 
 @user_router.message(FSMBalance.replenish_balance, lambda x: not x.text.isdigit() or int(x.text) <= 0)
 async def unsuccessful_amount(message: Message) -> None:

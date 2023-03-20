@@ -27,7 +27,6 @@ def includes_all_routers(dp: Dispatcher) -> None:
     dp.include_router(other_router)
 
 
-
 # Функция конфигурирования и запуска бота
 async def main() -> None:
     # Конфигурируем логгирование
