@@ -11,18 +11,18 @@ class CatalogPhoto(BaseModel, AdminModel):
 
     id: Mapped[int] = Column(Integer, primary_key=True)
 
-    faq_content: Mapped[String] = Column(String, nullable=False)
+    photo: Mapped[String] = Column(String, nullable=False)
 
     @classmethod
-    async def get_faq_content(cls) -> str:
-        query = select(cls.faq_content)
-        faq_text = await async_db_session.execute(query)
-        faq_text = faq_text.scalars().first()
+    async def get_photo(cls) -> str:
+        query = select(cls.photo)
+        photo = await async_db_session.execute(query)
+        photo = photo.scalars().first()
 
-        return faq_text
+        return photo
 
     @classmethod
-    async def delete_faq_content(cls) -> None:
+    async def delete_photo(cls) -> None:
         query = sqlalchemy_delete(cls)
         await async_db_session.execute(query)
 
