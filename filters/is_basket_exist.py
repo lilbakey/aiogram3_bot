@@ -11,7 +11,4 @@ class IsBasketExist(BaseFilter):
         products: list = [await Product.get_object(i.product_id) for i in basket.products]
         list_of_products: list[tuple[str, str | int]] = [(i.name, i.price) for i in products]
 
-        print('*' * 50)
-        print(list_of_products)
-
         return True if list_of_products else False
