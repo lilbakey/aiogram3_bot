@@ -33,8 +33,8 @@ def format_order(products: list[tuple[str, str | int]]) -> dict[str, str]:
 async def update_storage(length: int,
                          storage: dict[str, Union[str, int]],
                          state: FSMContext) -> dict[str, Union[str, int]]:
-    if storage['delete_step'] > length:
-        storage: dict[str, Union[str, int]] = await state.update_data(delete_step=1)
-    elif storage['delete_step'] < 1:
-        storage: dict[str, Union[str, int]] = await state.update_data(delete_step=length)
+    if storage['step'] > length:
+        storage: dict[str, Union[str, int]] = await state.update_data(step=1)
+    elif storage['step'] < 1:
+        storage: dict[str, Union[str, int]] = await state.update_data(step=length)
     return storage

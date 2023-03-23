@@ -4,7 +4,7 @@ from aiogram.types import Message
 from models.Category import Category
 
 
-class ExistNameCategory(BaseFilter):
+class CheckNameCategory(BaseFilter):
 
     async def __call__(self, message: Message) -> bool:
         name = await Category.check_name_in_base(message.text)

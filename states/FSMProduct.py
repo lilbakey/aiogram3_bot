@@ -8,5 +8,5 @@ class FSMProduct(StatesGroup):
     download_price: State = State()
     download_category: State = State()
     delete_product: State = State()
-    delete_step: State = State()
+    step: State = State()
     product_id: State = State()

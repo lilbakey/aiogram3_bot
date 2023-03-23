@@ -5,6 +5,8 @@ from aiogram.filters import Text, Command
 from aiogram.types import Message, CallbackQuery, InputMediaPhoto
 from aiogram.fsm.context import FSMContext
 
+from filters.is_categories_exists import IsCategoriesExists
+from filters.check_name_category import CheckNameCategory
 from middlewares.throttling import AntiFloodMiddleware
 from utils.utils import get_input_media
 from services.services import update_storage
@@ -16,13 +18,13 @@ from .user_handlers import get_start_kb
 from keyboards.keyboards_admin import (get_admin_kb, get_product_settings_kb, cancel_fsm_kb, create_categories_kb,
                                        delete_categories_kb, create_catalog_kb, delete_product_kb, get_general_settings)
 
-from filters.is_admin import IsAdmin, admins_id
+from filters.is_admin import IsAdmin
 
 from models import (CatalogPhoto, Category, FAQ, Help, Product, User)
 
 admin_router: Router = Router()
-admin_router.message.filter(IsAdmin(admins_id))
-admin_router.callback_query.filter(IsAdmin(admins_id))
+admin_router.message.filter(IsAdmin())
+admin_router.callback_query.filter(IsAdmin())
 admin_router.message.middleware(AntiFloodMiddleware())
 admin_router.callback_query.middleware(AntiFloodMiddleware())
 
@@ -112,22 +114,27 @@ async def sent_incorrect_price(message: Message) -> None:
                          reply_markup=cancel_fsm_kb())
 
 
-# Хендлер срабатывающий на корректно отправленную цену
-@admin_router.message(FSMProduct.download_price, lambda x: x.text.isdigit and int(x.text) > 1)
+# Хендлер срабатывающий на корректно отправленную цену c существующими категориями
+@admin_router.message(FSMProduct.download_price, lambda x: x.text.isdigit and int(x.text) > 1, IsCategoriesExists())
 async def sent_correct_price(message: Message, state: FSMContext) -> None:
     await state.update_data(price=message.text)
-
     categories: list = [i.name for i in await Category.get_all()]
 
-    if categories:
+    await message.answer(text=LEXICON['choice_category'],
+                         reply_markup=create_categories_kb(categories))
+    await message.answer(text=LEXICON['text_name_category'],
+                         reply_markup=cancel_fsm_kb())
 
-        await message.answer(text=LEXICON['choice_category'],
-                             reply_markup=create_categories_kb(categories))
-        await message.answer(text=LEXICON['text_name_category'],
-                             reply_markup=cancel_fsm_kb())
-    else:
-        await message.answer(text=LEXICON['no_category'],
-                             reply_markup=cancel_fsm_kb())
+    await state.set_state(FSMProduct.download_category)
+
+
+# Хендлер срабатывающий на корректно отправленную цену без существующих категорий
+@admin_router.message(FSMProduct.download_price, lambda x: x.text.isdigit and int(x.text) > 1, ~IsCategoriesExists())
+async def sent_correct_price_no_category(message: Message, state: FSMContext) -> None:
+    await state.update_data(price=message.text)
+
+    await message.answer(text=LEXICON['no_category'],
+                         reply_markup=cancel_fsm_kb())
 
     await state.set_state(FSMProduct.download_category)
 
@@ -151,27 +158,28 @@ async def cb_category_name(callback: CallbackQuery, state: FSMContext) -> None:
 
 
 # Хендлер срабатывающий на сообщение с названием новой категории при создании товара
-@admin_router.message(FSMProduct.download_category, F.text)
+@admin_router.message(FSMProduct.download_category, F.text, ~CheckNameCategory())
 async def msg_category_name(message: Message, state: FSMContext) -> None:
-    is_name_in_base: bool = await Category.check_name_in_base(message.text)
+    product_dict: dict[str, Union[str, int]] = await state.update_data(category=message.text)
+    category_id: str = (await Category.create(name=product_dict['category'])).id
 
-    if not is_name_in_base:
-        product_dict: dict[str, Union[str, int]] = await state.update_data(category=message.text)
-        category_id: str = (await Category.create(name=product_dict['category'])).id
+    await Product.create(photo=product_dict['photo'],
+                         name=product_dict['name'],
+                         description=product_dict['description'],
+                         price=int(product_dict['price']),
+                         category_id=int(category_id))
 
-        await Product.create(photo=product_dict['photo'],
-                             name=product_dict['name'],
-                             description=product_dict['description'],
-                             price=int(product_dict['price']),
-                             category_id=int(category_id))
+    await state.clear()
 
-        await state.clear()
+    await message.answer(text=LEXICON['FSM_finish'],
+                         reply_markup=get_product_settings_kb())
 
-        await message.answer(text=LEXICON['FSM_finish'],
-                             reply_markup=get_product_settings_kb())
-    else:
-        await message.answer(text=LEXICON['exists_category'],
-                             reply_markup=cancel_fsm_kb())
+
+# Хендлер срабатывающий на сообщение с названием новой категории если она уже существует
+@admin_router.message(FSMProduct.download_category, F.text, CheckNameCategory())
+async def msg_category_name_exist(message: Message, state: FSMContext) -> None:
+    await message.answer(text=LEXICON['exists_category'],
+                         reply_markup=cancel_fsm_kb())
 
 
 # Хендлер срабатывающий на кнопку загрузки новой категории
@@ -182,39 +190,44 @@ async def download_category(message: Message, state: FSMContext) -> None:
     await state.set_state(FSMCategory.download_category)
 
 
-# Хендлер проверяющий на существование введеное название категории
-@admin_router.message(FSMCategory.download_category)
+# Хендлер говорящий, что категория уже существует
+@admin_router.message(FSMCategory.download_category, CheckNameCategory())
 async def download_category_1(message: Message, state: FSMContext) -> None:
-    is_name_in_base: bool = await Category.check_name_in_base(message.text)
+    await message.answer(text=LEXICON['exists_category'],
+                         reply_markup=cancel_fsm_kb())
 
-    if not is_name_in_base:
-        await Category.create(name=message.text)
 
-        await state.clear()
+# Хендлер создающий новую категорию
+@admin_router.message(FSMCategory.download_category, ~CheckNameCategory())
+async def download_category_1(message: Message, state: FSMContext) -> None:
+    await Category.create(name=message.text)
 
-        await message.answer(text=LEXICON['successful_name_cat'],
-                             reply_markup=get_product_settings_kb())
-    else:
-        await message.answer(text=LEXICON['exists_category'],
-                             reply_markup=cancel_fsm_kb())
+    await state.clear()
+
+    await message.answer(text=LEXICON['successful_name_cat'],
+                         reply_markup=get_product_settings_kb())
 
 
 # Хендлер срабатывающий при нажатии кнопки удалить категорию
-@admin_router.message(Text(text=LEXICON['delete_category']))
+# если они существуют
+@admin_router.message(Text(text=LEXICON['delete_category']), IsCategoriesExists())
 async def delete_category(message: Message, state: FSMContext) -> None:
     categories: list = [i.name for i in await Category.get_all()]
 
-    if categories:
+    await state.set_state(FSMCategory.delete_category)
 
-        await state.set_state(FSMCategory.delete_category)
+    await message.answer(text=LEXICON['delete_category_1'],
+                         reply_markup=delete_categories_kb(categories))
 
-        await message.answer(text=LEXICON['delete_category_1'],
-                             reply_markup=delete_categories_kb(categories))
+    await message.answer(text=LEXICON['delete_category_2'],
+                         reply_markup=cancel_fsm_kb())
 
-        await message.answer(text=LEXICON['delete_category_2'],
-                             reply_markup=cancel_fsm_kb())
-    else:
-        await message.answer(text=LEXICON['no_exists_category'])
+
+# Хендлер срабатывающий при нажатии кнопки удалить категорию
+# если они не существуют
+@admin_router.message(Text(text=LEXICON['delete_category']), ~IsCategoriesExists())
+async def delete_category(message: Message, state: FSMContext) -> None:
+    await message.answer(text=LEXICON['no_exists_category'])
 
 
 # Хендлер срабатывающий на КоллБэк для удаления категории
@@ -235,7 +248,7 @@ async def delete_category_1(callback: CallbackQuery) -> None:
 
 # Хендлер показывающий категории, срабатывает на КоллБэк "назад"
 # и при удалении всех товаров из категории
-@admin_router.callback_query(FSMProduct.delete_step, Text(text='back_button'))
+@admin_router.callback_query(FSMProduct.step, Text(text='back_button'))
 async def cb_process_delete_product(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
 
@@ -272,26 +285,25 @@ async def process_delete_product_1(callback: CallbackQuery, state: FSMContext) -
     category_id: str = await Category.get_category_id(category_name)
     list_of_products: list[dict[str, Union[str, int]]] = await Product.get_products_in_category(category_id)
 
-    await state.set_state(FSMProduct.delete_step)
+    await state.set_state(FSMProduct.step)
 
-    storage: dict[str, Union[str, int]] = await state.update_data(delete_step=1, category=category_id)
-    content = list_of_products[storage['delete_step'] - 1]
+    storage: dict[str, Union[str, int]] = await state.update_data(step=1, category=category_id)
+    content = list_of_products[storage['step'] - 1]
 
     await callback.message.answer_photo(photo=content['photo'],
                                         caption=f'<b> {content["name"]} </b>\n'
                                                 f'{content["descr"]}\n'
                                                 f'<b>{content["price"]} ₽</b>',
                                         reply_markup=delete_product_kb('backward',
-                                                                       f'{storage["delete_step"]} /'
+                                                                       f'{storage["step"]} /'
                                                                        f' {len(list_of_products)}',
                                                                        'forward'))
     await state.update_data(product_id=int(content['id']))
-
     await callback.answer()
 
 
 # Хендлер срабатывающий на удаление товара
-@admin_router.callback_query(FSMProduct.delete_step, Text(text='delete_product_button'))
+@admin_router.callback_query(FSMProduct.step, Text(text='delete_product_button'))
 async def show_menu_for_delete(callback: CallbackQuery, state: FSMContext) -> None:
     storage: dict[str, Union[str, int]] = await state.get_data()
 
@@ -306,43 +318,43 @@ async def show_menu_for_delete(callback: CallbackQuery, state: FSMContext) -> No
         await cb_process_delete_product(callback, state)
 
     storage: dict[str, Union[str, int]] = await update_storage(length, storage, state)
-    content: dict[str, Union[str, int]] = list_of_products[storage['delete_step'] - 1]
+    content: dict[str, Union[str, int]] = list_of_products[storage['step'] - 1]
     if length > 1:
         media: InputMediaPhoto = get_input_media(content)
         await callback.message.edit_media(media=media,
                                           reply_markup=delete_product_kb('backward',
-                                                                         f'{storage["delete_step"]} / {length}',
+                                                                         f'{storage["step"]} / {length}',
                                                                          'forward'))
     elif length == 1:
         await callback.message.edit_reply_markup(reply_markup=delete_product_kb('backward',
-                                                                                f'{storage["delete_step"]} / {length}',
+                                                                                f'{storage["step"]} / {length}',
                                                                                 'forward'))
     await state.update_data(product_id=int(content['id']))
     await callback.answer()
 
 
 # Хендлер срабатывающий на кнопку "вперед" или "назад"
-@admin_router.callback_query(FSMProduct.delete_step, Text(text=['forward', 'backward']))
+@admin_router.callback_query(FSMProduct.step, Text(text=['forward', 'backward']))
 async def process_step_press(callback: CallbackQuery, state: FSMContext) -> None:
     storage: dict[str, Union[str, int]] = await state.get_data()
     if callback.data == 'forward':
-        storage: dict[str, Union[str, int]] = await state.update_data(delete_step=storage['delete_step'] + 1)
+        storage: dict[str, Union[str, int]] = await state.update_data(step=storage['step'] + 1)
     else:
-        storage: dict[str, Union[str, int]] = await state.update_data(delete_step=storage['delete_step'] - 1)
+        storage: dict[str, Union[str, int]] = await state.update_data(step=storage['step'] - 1)
 
     list_of_products: list[dict[str, Union[str, int]]] = await Product.get_products_in_category(storage['category'])
     length = len(list_of_products)
 
     storage: dict[str, Union[str, int]] = await update_storage(length, storage, state)
-    content: dict[str, Union[str, int]] = list_of_products[storage['delete_step'] - 1]
+    content: dict[str, Union[str, int]] = list_of_products[storage['step'] - 1]
 
-    media: InputMediaPhoto = get_input_media(content)
-
-    await callback.message.edit_media(media=media,
-                                      reply_markup=delete_product_kb('backward',
-                                                                     f'{storage["delete_step"]} / {length}',
-                                                                     'forward'))
-    await state.update_data(product_id=int(content['id']))
+    if length != 1:
+        media: InputMediaPhoto = get_input_media(content)
+        await callback.message.edit_media(media=media,
+                                          reply_markup=delete_product_kb('backward',
+                                                                         f'{storage["step"]} / {length}',
+                                                                         'forward'))
+        await state.update_data(product_id=int(content['id']))
 
     await callback.answer()
 
